@@ -1,14 +1,60 @@
-
-from fastapi import FastAPI,Path,HTTPException,Query
+from pydantic import BaseModel,Field,computed_field
+from typing import Annotated,Literal,Optional
+from fastapi.responses import JSONResponse # type:ignore
+from fastapi import FastAPI,Path,HTTPException,Query # type:ignore
 import json
 app = FastAPI()
 
 
-
+class Patient(BaseModel):
+    id:Annotated[str,Field(...,description='enter patiend id',examples=['P001'])]
+    name:Annotated[str,Field(...,description='enter the patient name')]
+    city:Annotated[str,Field(...,description='enter name of city')]
+    age:Annotated[int,Field(...,gt=0,lt=120,description='enter the age of patient')]
+    gender:Annotated[Literal['male','female','other'],Field(...,description='gender of the patient')]
+    height:Annotated[float,Field(...,gt=0,description='height of patient')]
+    weight:Annotated[float,Field(...,gt=0,description='weight of patient')]
+    
+    @computed_field()
+    @property
+    def bmi(self)->float:
+        temp = round(self.weight/(self.height**2),2)
+        return temp
+    
+    
+    @computed_field
+    @property
+    def verdict(self)->str:
+        if(self.bmi <18.5):
+            return 'underweight'
+        elif(self.bmi<25):
+            return 'normal'
+        elif(self.bmi<28):
+            return 'normal'
+        else:
+            return 'obese'
+        
+    
+    
+        
+class PatientUpdate(BaseModel):
+    name: Annotated[Optional[str], Field(default=None)]
+    city: Annotated[Optional[str], Field(default=None)]
+    age: Annotated[Optional[int], Field(default=None, gt=0)]
+    gender: Annotated[Optional[Literal['male', 'female']], Field(default=None)]
+    height: Annotated[Optional[float], Field(default=None, gt=0)]
+    weight: Annotated[Optional[float], Field(default=None, gt=0)]
+    
 def load():
     with open('patients.json','r') as f:
         data = json.load(f)
     return data
+
+def save(data):
+    with open('patients.json','w') as f:
+        json.dump(data,f)
+    
+    
 
 
 @app.get('/')
@@ -55,6 +101,60 @@ def sort(sort_by:str = Query(...,description = 'sort by the weight,height and bm
     
     return sorted_data
      
+
+@app.post('/create')
+def create(patient:Patient):
+    data = load()
+    
+    if patient.id in data:
+        raise HTTPException(status_code=400,detail='patient already exists for this id')
+    
+    data[patient.id]=patient.model_dump(exclude=['id'])
+    
+    save(data)
+    
+    return JSONResponse(status_code=201,content={"message":"patient added successfully"})
+    
+    
      
      
-     
+@app.put('/update/{patient_id}')
+def update(patient_id : str,patient_update: PatientUpdate):
+    data = load()
+    
+    if patient_id not in data:
+        raise HTTPException(status_code = 404,detail='not exists')
+    
+    
+    old_data=data[patient_id]
+    new_data=patient_update.model_dump(exclude_unset=True)
+    
+    for key,value in new_data.items():
+        old_data[key] = value
+        
+    old_data['id'] = patient_id
+    
+    obj = Patient(**old_data)
+    
+    old_data = obj.model_dump(exclude=['id'])
+    
+    data[patient_id] = old_data
+    
+    save(data)
+    
+    return JSONResponse(status_code=200,content={'message':'user updated'})
+
+
+
+@app.delete('/delete/{patient_id}')
+def delete(patient_id : str):
+    data = load()
+    
+    if patient_id not in data:
+        raise HTTPException(status_code=404,detail='patient not found')
+    
+    del data[patient_id]
+    
+    save(data)
+    
+    return JSONResponse(status_code = 200,content={'message':'patient deleted successfully'})
